@@ -61,7 +61,11 @@ switch:
     pins:
       0 : Output_0
       1 : Output_1
-      2 : Output_2
+      2 :
+         name: Output_2
+         momentary: true # (default true)
+         pulse_time: 200  # Pulse duration in ms (default 200)
+         sensor: binary_sensor.button_2  # Tracks state from this binary sensor
       3 : Output_3
   - platform: mcp23017
     i2c_bus: 2
@@ -69,7 +73,9 @@ switch:
     hw_sync: false
     pins:
       0 : Output_4
-      1 : Output_5
+      1 :
+         name: Output_5
+         sensor: binary_sensor.button_5  # Tracks state from this binary sensor
       2 : Output_6
       3 : Output_7
 ```
