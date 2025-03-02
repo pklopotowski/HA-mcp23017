@@ -1,3 +1,6 @@
+import voluptuous as vol
+from homeassistant.helpers import config_validation as cv
+
 """Constants for MCP23017 integration."""
 DOMAIN = "mcp23017"
 
@@ -29,3 +32,31 @@ DEFAULT_PULL_MODE = MODE_UP
 DEFAULT_HW_SYNC = True
 
 DEFAULT_PULSE_TIME = 200
+
+# Schema for simple pin configuration (e.g., "0: setBi16")
+_SIMPLE_PIN_SCHEMA = cv.string
+
+# Schema for advanced pin configuration (e.g., "1: {name: lt_ogrod_kinkiet_taras, ...}")
+_ADVANCED_PIN_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_PIN_NAME): cv.string,
+        vol.Optional(CONF_MOMENTARY, default=True): cv.boolean,
+        vol.Optional(CONF_PULSE_TIME, default=DEFAULT_PULSE_TIME): cv.positive_int,
+        vol.Optional(CONF_SENSOR): cv.string,
+    }
+)
+
+# Combine simple and advanced pin schemas
+_PIN_SCHEMA = vol.Any(_SIMPLE_PIN_SCHEMA, _ADVANCED_PIN_SCHEMA)
+
+# Schema for the entire pins dictionary
+_PINS_SCHEMA = vol.Schema({cv.positive_int: _PIN_SCHEMA})
+
+# Base schema for MCP23017
+MCP23017_BASE_SCHEMA = {
+    vol.Required(CONF_PINS): _PINS_SCHEMA,
+    vol.Optional(CONF_INVERT_LOGIC, default=DEFAULT_INVERT_LOGIC): cv.boolean,
+    vol.Optional(CONF_HW_SYNC, default=DEFAULT_HW_SYNC): cv.boolean,
+    vol.Optional(CONF_I2C_ADDRESS, default=DEFAULT_I2C_ADDRESS): vol.Coerce(int),
+    vol.Optional(CONF_I2C_BUS, default=DEFAULT_I2C_BUS): vol.Coerce(int),
+}
