@@ -26,7 +26,8 @@
                     "pull_mode": "Pull-up resistor",
                     "hw_sync": "Initial value from hardware",
                     "momentary": "Pulsed output",
-                    "pulse_time": "Pulse time (ms)"
+                    "pulse_time": "Pulse time (ms)",
+                    "sensor": "State sensor (bistable relay)"
                 }
             }
         }

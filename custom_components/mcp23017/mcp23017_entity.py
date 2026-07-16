@@ -91,6 +91,7 @@ class MCP23017Entity:
         self._device = None
         self._state = None
         self._unsub_turn_off = None
+        self._unsubscribe_sensor = None
         self._hass = hass
 
         self._i2c_address = config_entry.data[CONF_I2C_ADDRESS]
@@ -146,16 +147,20 @@ class MCP23017Entity:
     async def async_added_to_hass(self):
         """Register callbacks and initialize state."""
         if self._sensor:
-            async_track_state_change_event(
-                self._hass, self._sensor, self._async_sensor_changed
-            )
+            self._subscribe_sensor()
             # Fetch initial sensor state
             sensor_state = self._hass.states.get(self._sensor)
             if sensor_state:
                 self._sensor_state = sensor_state.state
                 self._state = self._sensor_state == 'on'
             else:
-                _LOGGER.warning(f"Sensor {self._sensor} not found. State tracking may not work correctly.")
+                _LOGGER.warning(
+                    f"Sensor {self._sensor} not found, "
+                    f"using hardware state for {self._pin_name}."
+                )
+                self._state = await self._hass.async_add_executor_job(
+                    self._device.get_pin_value, self._pin_number
+                ) ^ self._invert_logic
         else:
             # Initialize state based on device pin value
             self._state = await self._hass.async_add_executor_job(
@@ -164,6 +169,18 @@ class MCP23017Entity:
 
         # Write initial state to Home Assistant
         self.async_write_ha_state()
+
+    def _subscribe_sensor(self):
+        """Subscribe to state changes of the configured sensor."""
+        self._unsubscribe_sensor = async_track_state_change_event(
+            self._hass, self._sensor, self._async_sensor_changed
+        )
+
+    def _unsubscribe_sensor_if_exists(self):
+        """Unsubscribe from sensor state changes."""
+        if self._unsubscribe_sensor:
+            self._unsubscribe_sensor()
+            self._unsubscribe_sensor = None
 
     async def _async_sensor_changed(self, event):
         """Handle binary sensor state changes."""
@@ -185,7 +202,9 @@ class MCP23017Entity:
     @property
     def is_on(self):
         """Return true if the entity is on, based on the binary sensor state."""
-        return self._sensor_state == "on" if self._sensor else self._state
+        if self._sensor and self._sensor_state is not None:
+            return self._sensor_state == "on"
+        return self._state
 
     @property
     def pin(self):
@@ -293,6 +312,20 @@ class MCP23017Entity:
     async def async_config_update(self, hass, config_entry):
         """Handle update from config entry options."""
         self._invert_logic = config_entry.options[CONF_INVERT_LOGIC]
+        self._momentary = config_entry.options.get(CONF_MOMENTARY, self._momentary)
+        self._pulse_time = config_entry.options.get(CONF_PULSE_TIME, self._pulse_time)
+
+        new_sensor = config_entry.options.get(CONF_SENSOR)
+        if new_sensor != self._sensor:
+            self._unsubscribe_sensor_if_exists()
+            self._sensor = new_sensor
+            self._sensor_state = None
+            if self._sensor:
+                self._subscribe_sensor()
+                sensor_state = hass.states.get(self._sensor)
+                if sensor_state:
+                    self._sensor_state = sensor_state.state
+
         await hass.async_add_executor_job(
             functools.partial(
                 self._device.set_pin_value,
@@ -303,7 +336,8 @@ class MCP23017Entity:
         self.async_schedule_update_ha_state()
 
     def unsubscribe_update_listener(self):
-        """Remove listener from config entry options."""
+        """Remove listeners from config entry options and sensor."""
+        self._unsubscribe_sensor_if_exists()
         self._unsubscribe_update_listener()
 
     def configure_device(self):

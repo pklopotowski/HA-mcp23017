@@ -26,7 +26,8 @@
                     "pull_mode": "Résistance de rappel",
                     "hw_sync": "Valeur initiale depuis le composant",
                     "momentary": "Sortie temporisée",
-                    "pulse_time": "Temporisation (ms)"
+                    "pulse_time": "Temporisation (ms)",
+                    "sensor": "Capteur d'état (relais bistable)"
                 }
             }
         }

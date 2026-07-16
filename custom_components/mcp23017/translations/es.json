@@ -26,7 +26,8 @@
                     "pull_mode": "Resistencia Pull-up",
                     "hw_sync": "Sincronizar valor inicial desde hardware",
                     "momentary": "Salida pulsada",
-                    "pulse_time": "Tiempo de pulso (ms)"
+                    "pulse_time": "Tiempo de pulso (ms)",
+                    "sensor": "Sensor de estado (relé biestable)"
                 }
             }
         }
