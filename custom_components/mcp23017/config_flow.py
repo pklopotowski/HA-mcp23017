@@ -70,12 +70,21 @@ class Mcp23017ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return Mcp23017OptionsFlowHandler()
 
     async def async_step_import(self, user_input=None):
-        """Create a new entity from configuration.yaml import."""
+        """Create or update an entity from configuration.yaml import."""
 
         config_entry = await self.async_set_unique_id(self._unique_id(user_input))
-        # Remove entry (from storage) matching the same unique id
+        # Update entry (from storage) matching the same unique id, keeping
+        # its entry_id and UI-configured options stable across restarts
         if config_entry:
-            await self.hass.config_entries.async_remove(config_entry.entry_id)
+            if self.hass.config_entries.async_update_entry(
+                config_entry,
+                title=self._title(user_input),
+                data=user_input,
+            ):
+                self.hass.config_entries.async_schedule_reload(
+                    config_entry.entry_id
+                )
+            return self.async_abort(reason="already_configured")
 
         return self.async_create_entry(
             title=self._title(user_input),
