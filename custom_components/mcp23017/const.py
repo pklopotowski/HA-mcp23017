@@ -4,8 +4,8 @@ from homeassistant.helpers import config_validation as cv
 """Constants for MCP23017 integration."""
 DOMAIN = "mcp23017"
 
-MODE_UP = "UP"
-MODE_DOWN = "NONE"
+PULL_MODE_UP = "up"
+PULL_MODE_NONE = "none"
 
 CONF_I2C_ADDRESS = "i2c_address"
 CONF_I2C_BUS = "i2c_bus"
@@ -28,7 +28,7 @@ DEFAULT_I2C_BUS = 1  # use /dev/i2c-{DEFAULT_I2C_BUS}
 DEFAULT_I2C_ADDRESS = 0x20
 
 DEFAULT_INVERT_LOGIC = False
-DEFAULT_PULL_MODE = MODE_UP
+DEFAULT_PULL_MODE = PULL_MODE_UP
 DEFAULT_HW_SYNC = True
 
 DEFAULT_MOMENTARY = False
