@@ -1,23 +1,33 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 
-[MCP23017 Custom Component](https://github.com/jpcornil-git/HA-mcp23017)
+# HA-mcp23017
 
-Custom component for the mcp23017 and mcp23008 i2c port expander ICs.
+MCP23008/MCP23017 I2C I/O expander integration — an extended continuation of
+[jpcornil-git/HA-mcp23017](https://github.com/jpcornil-git/HA-mcp23017).
+Everything the original offers keeps working; the additions are opt-in.
 
-## Highlights of what it does offer
+## Highlights of the original implementation
 
-- **Async** implementation (more reactive and nicer to HA)
-- **Thread-safety** allows different entities to use the same component
-- **Config Flow** support (UI configuration) in addition to legacy configuration.yaml.
-- **Push iso pull model** for higher reactivity, e.g. 100ms polling for 'zero-delay' push button without loading HA.
-- Optimized i2c bus bandwidth utilisation
-  - Polling per device instead of per entity/8x gain, register cache to avoid read-modify-write/3xgain or rewriting the same register value)
-- Synchronization with the device state at startup, e.g. avoid output glitches when HA restart.
-- Compatible with **MCP23008** (8 pins) device.
-- Multiple **I2C** busses support.
+- **Async**, **thread-safe** implementation with **Config Flow** support
+- **Push iso pull model** — 100 ms polling for 'zero-delay' push buttons
+- Optimized I2C bandwidth (per-device polling, register cache), bus-error
+  protection with recovery notification
+- Device-state synchronization at startup, **MCP23008** compatible,
+  multiple **I2C busses**
+
+## What this continuation adds
+
+- **`light` platform** and **pulsed (momentary) outputs** for bistable
+  relays (e.g. Hager EPN524), gate openers, and impulse-driven loads
+- **Feedback state tracking** from a `binary_sensor` — the entity state is
+  the physical relay position, even when wall buttons bypass Home Assistant
+- **Wall-button events** (`single`/`double`) as event entities, with a
+  bundled blueprint for pairing a press with an action
+- Stability and safety improvements: stable config entries across restarts,
+  current-HA options flow, hardware-safety guarantees for pulsed outputs
 
 ## Useful links
 
-- [Repository](https://github.com/jpcornil-git/HA-mcp23017)
-- [MCP23017 component](https://www.microchip.com/wwwproducts/en/mcp23017)
-- [RPi GPIO expander](https://github.com/jpcornil-git/RPiHat_GPIO_Expander)
+- [Repository and documentation](https://github.com/pklopotowski/HA-mcp23017)
+- [Original integration](https://github.com/jpcornil-git/HA-mcp23017)
+- [MCP23017 device](https://www.microchip.com/wwwproducts/en/mcp23017)

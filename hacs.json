@@ -1,5 +1,4 @@
 {
-  "name": "MCP23017",
-  "country": "BE",
-  "homeassistant": "2021.3.0"
+  "name": "MCP23008/MCP23017 Digital I/O Expander",
+  "homeassistant": "2025.1.0"
 }
