@@ -356,8 +356,8 @@ class MCP23017Entity:
                 self._state = value
             self.async_write_ha_state()
             _LOGGER.debug(f"{self._pin_name} set to {value} (invert_logic: {self._invert_logic}).")
-        except Exception as e:
-            _LOGGER.error(f"Failed to set {self._pin_name} to {value}: {e}")
+        except OSError as error:
+            _LOGGER.error(f"Failed to set {self._pin_name} to {value}: {error}")
 
     async def _async_handle_turn_off(self, _):
         """Callback to turn off the switch after the pulse time."""
