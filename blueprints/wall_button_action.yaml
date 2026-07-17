@@ -1,0 +1,55 @@
+blueprint:
+  name: MCP23017 wall-button action
+  description: >
+    Run actions when a physical wall button registers a press.
+
+    Works with the event entities exposed by the MCP23017 integration for
+    sensor-tracked outputs. Choose the press type to react to: 'single'
+    (every wall press; delayed by the double-click window when double-click
+    detection is enabled on the pin) or 'double' (requires double_click
+    enabled on the pin).
+  domain: automation
+  source_url: https://github.com/pklopotowski/HA-mcp23017/blob/main/blueprints/wall_button_action.yaml
+  input:
+    button_event:
+      name: Wall-button event entity
+      description: The event entity exposed by the MCP23017 integration.
+      selector:
+        entity:
+          filter:
+            - integration: mcp23017
+              domain: event
+    press_type:
+      name: Press type
+      description: Which press should run the actions.
+      default: double
+      selector:
+        select:
+          options:
+            - single
+            - double
+    actions:
+      name: Actions
+      description: >
+        Actions to run on the selected press, e.g. toggle another light,
+        activate a scene, or target a whole area.
+      selector:
+        action: {}
+
+mode: single
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    entity_id: !input button_event
+    not_from:
+      - unknown
+      - unavailable
+
+conditions:
+  - condition: state
+    entity_id: !input button_event
+    attribute: event_type
+    state: !input press_type
+
+actions: !input actions
