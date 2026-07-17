@@ -27,7 +27,10 @@
                     "hw_sync": "Valeur initiale depuis le composant",
                     "momentary": "Sortie temporisée",
                     "pulse_time": "Temporisation (ms)",
-                    "sensor": "Capteur d'état (relais bistable)"
+                    "sensor": "Capteur d'état (relais bistable)",
+                    "double_click": "Détection du double appui (bouton mural)",
+                    "double_click_window": "Fenêtre du double appui (ms)",
+                    "event_suppress_margin": "Marge de suppression des actions propres (ms)"
                 }
             }
         }

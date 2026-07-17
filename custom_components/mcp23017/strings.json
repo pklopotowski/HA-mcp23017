@@ -27,7 +27,10 @@
                     "hw_sync": "Initial value from hardware",
                     "momentary": "Pulsed output",
                     "pulse_time": "Pulse time (ms)",
-                    "sensor": "State sensor (bistable relay)"
+                    "sensor": "State sensor (bistable relay)",
+                    "double_click": "Double click detection (wall button)",
+                    "double_click_window": "Double click window (ms)",
+                    "event_suppress_margin": "Own-action suppress margin (ms)"
                 }
             }
         }

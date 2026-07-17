@@ -27,7 +27,10 @@
                     "hw_sync": "Sincronizar valor inicial desde hardware",
                     "momentary": "Salida pulsada",
                     "pulse_time": "Tiempo de pulso (ms)",
-                    "sensor": "Sensor de estado (relé biestable)"
+                    "sensor": "Sensor de estado (relé biestable)",
+                    "double_click": "Detección de doble pulsación (botón de pared)",
+                    "double_click_window": "Ventana de doble pulsación (ms)",
+                    "event_suppress_margin": "Margen de supresión de acciones propias (ms)"
                 }
             }
         }

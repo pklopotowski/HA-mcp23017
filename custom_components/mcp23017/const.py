@@ -34,6 +34,17 @@ DEFAULT_HW_SYNC = True
 DEFAULT_MOMENTARY = False
 DEFAULT_PULSE_TIME = 200
 
+CONF_DOUBLE_CLICK = "double_click"
+CONF_DOUBLE_CLICK_WINDOW = "double_click_window"
+CONF_EVENT_SUPPRESS_MARGIN = "event_suppress_margin"
+
+DEFAULT_DOUBLE_CLICK = False
+DEFAULT_DOUBLE_CLICK_WINDOW = 600  # ms
+# Extra time added to the pulse time when suppressing sensor transitions
+# caused by the integration's own pin actions; must exceed the worst-case
+# feedback latency: relay switching + input polling + HA dispatch
+DEFAULT_EVENT_SUPPRESS_MARGIN = 1000  # ms
+
 # Schema for simple pin configuration (e.g., "0: setBi16")
 _SIMPLE_PIN_SCHEMA = cv.string
 
@@ -44,6 +55,13 @@ _ADVANCED_PIN_SCHEMA = vol.Schema(
         vol.Optional(CONF_MOMENTARY, default=True): cv.boolean,
         vol.Optional(CONF_PULSE_TIME, default=DEFAULT_PULSE_TIME): cv.positive_int,
         vol.Optional(CONF_SENSOR): cv.string,
+        vol.Optional(CONF_DOUBLE_CLICK, default=DEFAULT_DOUBLE_CLICK): cv.boolean,
+        vol.Optional(
+            CONF_DOUBLE_CLICK_WINDOW, default=DEFAULT_DOUBLE_CLICK_WINDOW
+        ): cv.positive_int,
+        vol.Optional(
+            CONF_EVENT_SUPPRESS_MARGIN, default=DEFAULT_EVENT_SUPPRESS_MARGIN
+        ): cv.positive_int,
     }
 )
 

@@ -20,6 +20,7 @@ from .const import (
     CONF_I2C_ADDRESS,
     CONF_I2C_BUS,
     CONF_PULL_MODE,
+    CONF_SENSOR,
     DEFAULT_I2C_BUS,
     DEFAULT_SCAN_RATE,
     DOMAIN,
@@ -166,14 +167,27 @@ async def async_setup(hass, config):
     return True
 
 
+def entry_platforms(config_entry):
+    """Return the list of platforms to set up for a config entry."""
+    platforms = [config_entry.data[CONF_FLOW_PLATFORM]]
+    # Sensor-tracked outputs additionally expose wall-button press events
+    if config_entry.data[CONF_FLOW_PLATFORM] in ("switch", "light") and (
+        config_entry.options.get(
+            CONF_SENSOR, config_entry.data.get(CONF_SENSOR)
+        )
+    ):
+        platforms.append("event")
+    return platforms
+
+
 async def async_setup_entry(hass, config_entry):
     """Set up the MCP23017 from a config entry."""
 
     # Register this setup instance
     with setup_entry_status:
-        # Forward entry setup to configured platform
+        # Forward entry setup to configured platform(s)
         await hass.config_entries.async_forward_entry_setups(
-            config_entry, [config_entry.data[CONF_FLOW_PLATFORM]]
+            config_entry, entry_platforms(config_entry)
         )
 
     return True
@@ -181,9 +195,9 @@ async def async_setup_entry(hass, config_entry):
 
 async def async_unload_entry(hass, config_entry):
     """Unload entity from MCP23017 component and platform."""
-    # Unload related platform
-    await hass.config_entries.async_forward_entry_unload(
-        config_entry, config_entry.data[CONF_FLOW_PLATFORM]
+    # Unload related platform(s)
+    await hass.config_entries.async_unload_platforms(
+        config_entry, entry_platforms(config_entry)
     )
 
     i2c_address = config_entry.data[CONF_I2C_ADDRESS]

@@ -25,6 +25,9 @@ from .const import (
     CONF_MOMENTARY,
     CONF_PULSE_TIME,
     CONF_SENSOR,
+    CONF_DOUBLE_CLICK,
+    CONF_DOUBLE_CLICK_WINDOW,
+    CONF_EVENT_SUPPRESS_MARGIN,
     DEFAULT_I2C_ADDRESS,
     DEFAULT_I2C_BUS,
     DEFAULT_INVERT_LOGIC,
@@ -32,6 +35,9 @@ from .const import (
     DEFAULT_HW_SYNC,
     DEFAULT_MOMENTARY,
     DEFAULT_PULSE_TIME,
+    DEFAULT_DOUBLE_CLICK,
+    DEFAULT_DOUBLE_CLICK_WINDOW,
+    DEFAULT_EVENT_SUPPRESS_MARGIN,
     DOMAIN,
     PULL_MODE_NONE,
     PULL_MODE_UP,
@@ -210,6 +216,25 @@ class Mcp23017OptionsFlowHandler(config_entries.OptionsFlow):
                     ): EntitySelector(
                         EntitySelectorConfig(domain="binary_sensor")
                     ),
+                    vol.Optional(
+                        CONF_DOUBLE_CLICK,
+                        default=self.config_entry.options.get(
+                            CONF_DOUBLE_CLICK, DEFAULT_DOUBLE_CLICK
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_DOUBLE_CLICK_WINDOW,
+                        default=self.config_entry.options.get(
+                            CONF_DOUBLE_CLICK_WINDOW, DEFAULT_DOUBLE_CLICK_WINDOW
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=100, max=5000)),
+                    vol.Optional(
+                        CONF_EVENT_SUPPRESS_MARGIN,
+                        default=self.config_entry.options.get(
+                            CONF_EVENT_SUPPRESS_MARGIN,
+                            DEFAULT_EVENT_SUPPRESS_MARGIN,
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=100, max=10000)),
                 }
             )
         return self.async_show_form(step_id="init", data_schema=data_schema)
