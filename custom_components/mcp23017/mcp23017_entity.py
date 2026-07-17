@@ -1,16 +1,11 @@
 """Base class for MCP23017 entities."""
 
-import asyncio
 import functools
 import logging
 
-import voluptuous as vol
-
-from . import async_get_or_create, setup_entry_status
+from . import async_get_or_create
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.config_entries import SOURCE_IMPORT
-from homeassistant.core import callback
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import async_track_state_change_event, async_call_later
 
 from .const import (
@@ -79,10 +74,6 @@ async def _async_setup_entry(hass, config_entry, async_add_entities, entity_clas
     if await hass.async_add_executor_job(entity.configure_device):
         async_add_entities([entity])
 
-async def async_unload_entry(hass, config_entry):
-    """Unload MCP23017 switch entry corresponding to config_entry."""
-    _LOGGER.warning("[FIXME] async_unload_entry not implemented")
-
 class MCP23017Entity:
     """Base class for MCP23017 entities."""
 
@@ -137,7 +128,7 @@ class MCP23017Entity:
             self.async_config_update
         )
 
-        _LOGGER.info(
+        _LOGGER.debug(
             "%s(pin %d:'%s') created",
             type(self).__name__,
             self._pin_number,
@@ -181,6 +172,21 @@ class MCP23017Entity:
         if self._unsubscribe_sensor:
             self._unsubscribe_sensor()
             self._unsubscribe_sensor = None
+
+    async def async_will_remove_from_hass(self):
+        """Clean up subscriptions and pending timers before removal."""
+        self._unsubscribe_sensor_if_exists()
+        await self._async_cancel_turn_off_callback_if_exists()
+        if self._momentary:
+            # Leave a pulsed output at its inactive level so a removal in
+            # the middle of a pulse cannot keep the relay coil energized
+            await self._hass.async_add_executor_job(
+                functools.partial(
+                    self._device.set_pin_value,
+                    self._pin_number,
+                    self._invert_logic,
+                )
+            )
 
     async def _async_sensor_changed(self, event):
         """Handle binary sensor state changes."""
@@ -288,7 +294,9 @@ class MCP23017Entity:
 
     async def async_turn_on(self, **kwargs):
         """Turn the device on."""
-        if self.is_on and not self._momentary:
+        # Skip when already on: for a sensor-tracked bistable relay another
+        # pulse would toggle it back off
+        if self.is_on and (self._sensor or not self._momentary):
             _LOGGER.debug(f"{self._pin_name} is already on. Skipping.")
             return
 
@@ -308,7 +316,6 @@ class MCP23017Entity:
         else:
             await self._async_set_pin_value(False)
 
-    @callback
     async def async_config_update(self, hass, config_entry):
         """Handle update from config entry options."""
         self._invert_logic = config_entry.options[CONF_INVERT_LOGIC]
@@ -326,18 +333,29 @@ class MCP23017Entity:
                 if sensor_state:
                     self._sensor_state = sensor_state.state
 
-        await hass.async_add_executor_job(
-            functools.partial(
-                self._device.set_pin_value,
-                self._pin_number,
-                self._state ^ self._invert_logic,
+        if self._momentary:
+            # Pulsed output: never re-drive the tracked state onto the pin,
+            # its rest level must stay inactive
+            await self._async_cancel_turn_off_callback_if_exists()
+            await hass.async_add_executor_job(
+                functools.partial(
+                    self._device.set_pin_value,
+                    self._pin_number,
+                    self._invert_logic,
+                )
             )
-        )
+        else:
+            await hass.async_add_executor_job(
+                functools.partial(
+                    self._device.set_pin_value,
+                    self._pin_number,
+                    self._state ^ self._invert_logic,
+                )
+            )
         self.async_schedule_update_ha_state()
 
     def unsubscribe_update_listener(self):
-        """Remove listeners from config entry options and sensor."""
-        self._unsubscribe_sensor_if_exists()
+        """Remove listener from config entry options."""
         self._unsubscribe_update_listener()
 
     def configure_device(self):

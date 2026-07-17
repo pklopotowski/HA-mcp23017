@@ -478,6 +478,13 @@ class MCP23017(threading.Thread):
         """Unregister entity from the device."""
         with self:
             entity = self._entities[pin_number]
+            if entity is None:
+                _LOGGER.warning(
+                    "No entity registered on pin %d of %s, nothing to unregister",
+                    pin_number,
+                    self.unique_id,
+                )
+                return
             entity.unsubscribe_update_listener()
             self._entities[pin_number] = None
 
