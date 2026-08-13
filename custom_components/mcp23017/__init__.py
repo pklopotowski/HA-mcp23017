@@ -55,6 +55,11 @@ OLATB = 0x1a
 # Register address used to toggle IOCON.BANK to 1 (only mapped when BANK is 0)
 IOCON_REMAP = 0x0b
 
+# Poll cycles between configuration checks: every ~5 s (at the 0.1 s scan
+# rate) IODIRA is compared against the cache to detect a device that lost
+# its configuration without any bus error (e.g. a brown-out)
+DEVICE_VERIFY_CYCLES = 50
+
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["binary_sensor", "switch"]
@@ -301,6 +306,11 @@ class MCP23017(threading.Thread):
         self._address = address
         self._busNumber = bus
         self._i2c_fault_count = 0
+        # The constructor performs the initial full configuration itself; a
+        # fault-recovery resync must not fire before the cache exists, so
+        # the guard starts True and is released once the cache is built
+        self._resyncing = True
+        self._verify_countdown = 0
 
         # Check device presence
         try:
@@ -331,6 +341,7 @@ class MCP23017(threading.Thread):
                 f"I2C read failure during {self.unique_id} initialization"
             ) from error
 
+        self._resyncing = False
         self._entities = [None for i in range(16)]
         self._update_bitmap = 0
 
@@ -354,13 +365,7 @@ class MCP23017(threading.Thread):
         """Set MCP23017 {register} to {value}."""
         try:
             self._bus.write_byte_data(self._address, register, value)
-            if self._i2c_fault_count > 0:
-                _LOGGER.info(
-                    "I2C access recovered for %s after %d error(s)",
-                    self.unique_id,
-                    self._i2c_fault_count,
-                )
-                self._i2c_fault_count = 0
+            self._handle_i2c_recovery()
         except (OSError) as error:
             self._i2c_fault_count += 1
             if self._i2c_fault_count == 1:
@@ -377,12 +382,13 @@ class MCP23017(threading.Thread):
         try:
             data = self._bus.read_byte_data(self._address, register)
             if self._i2c_fault_count > 0:
-                _LOGGER.info(
-                    "I2C access recovered for %s after %d error(s)",
-                    self.unique_id,
-                    self._i2c_fault_count,
-                )
-                self._i2c_fault_count = 0
+                self._handle_i2c_recovery()
+                if self._i2c_fault_count == 0:
+                    # Recovery resynced the register mapping: the value read
+                    # above may have come from a wrong register of a
+                    # power-cycled (BANK=0) device, so read again with the
+                    # mapping restored
+                    data = self._bus.read_byte_data(self._address, register)
         except (OSError) as error:
             data = None
             self._i2c_fault_count += 1
@@ -394,6 +400,58 @@ class MCP23017(threading.Thread):
                     error,
                 )
         return data
+
+    def _handle_i2c_recovery(self):
+        """Reset the fault counter and resynchronize the device after a bus fault."""
+        # A success nested inside a partially failing resync must not reset
+        # the fault counter: a non-zero counter after the resync is what makes
+        # the polling probe trigger another full resync attempt
+        if self._resyncing or self._i2c_fault_count == 0:
+            return
+        _LOGGER.info(
+            "I2C access recovered for %s after %d error(s)",
+            self.unique_id,
+            self._i2c_fault_count,
+        )
+        self._i2c_fault_count = 0
+        self._resync_registers()
+
+    def _resync_registers(self):
+        """Rewrite configuration and output registers from cache.
+
+        Writes dropped during a bus fault leave the device out of sync with
+        the cache; an energized relay coil whose turn-off write was lost stays
+        energized until the registers are pushed again. A device power cycle
+        additionally resets IOCON.BANK and all registers, so the register
+        mapping is restored first and OLAT before IODIR, ensuring a pin drives
+        its cached level the moment it becomes an output again.
+        """
+        if self._resyncing:
+            return
+        self._resyncing = True
+        try:
+            iocon = self[IOCON_REMAP]
+            if iocon is None:
+                # Bus is down again; the next recovery will retry
+                return
+            self[IOCON_REMAP] = iocon | 0x80
+            if self._i2c_fault_count:
+                # Remap write dropped: BANK=1 addresses would land on the
+                # wrong registers of a BANK=0 device (including IOCON);
+                # the next recovery retries the full resync
+                return
+            # Normalize IOCON: a write misdirected while the device was in
+            # BANK=0 may have corrupted its other bits
+            self[IOCONA] = 0x80
+            for register, register_a, register_b in (
+                ("OLAT", OLATA, OLATB),
+                ("GPPU", GPPUA, GPPUB),
+                ("IODIR", IODIRA, IODIRB),
+            ):
+                self[register_a] = self._cache[register] & 0xFF
+                self[register_b] = (self._cache[register] >> 8) & 0xFF
+        finally:
+            self._resyncing = False
 
     def _get_register_value(self, register, bit):
         """Get MCP23017 {bit} of {register}."""
@@ -408,8 +466,13 @@ class MCP23017(threading.Thread):
 
         return bool(self._cache[register] & (1 << bit))
 
-    def _set_register_value(self, register, bit, value):
-        """Set MCP23017 {bit} of {register} to {value}."""
+    def _set_register_value(self, register, bit, value, force=False):
+        """Set MCP23017 {bit} of {register} to {value}.
+
+        With {force}, write the register even when the cache is unchanged:
+        safety-critical writes must reach the device even if a previous write
+        was dropped by a bus fault after updating the cache.
+        """
         # Update cache
         cache_old = self._cache[register]
         if value:
@@ -417,7 +480,7 @@ class MCP23017(threading.Thread):
         else:
             self._cache[register] &= ~(1 << bit) & 0xFFFF
         # Update device register only if required (minimize # of I2C  transactions)
-        if cache_old != self._cache[register]:
+        if force or cache_old != self._cache[register]:
             if bit < 8:
                 self[globals()[register + "A"]] = self._cache[register] & 0xFF
             else:
@@ -455,10 +518,10 @@ class MCP23017(threading.Thread):
         with self:
             return self._get_register_value("GPIO", pin)
 
-    def set_pin_value(self, pin, value):
+    def set_pin_value(self, pin, value, force=False):
         """Set MCP23017 GPIO[{pin}] to {value}."""
         with self:
-            self._set_register_value("OLAT", pin, value)
+            self._set_register_value("OLAT", pin, value, force)
 
     def set_input(self, pin, is_input):
         """Set MCP23017 GPIO[{pin}] as input."""
@@ -531,18 +594,43 @@ class MCP23017(threading.Thread):
             with self:
                 # Read pin values for bank A and B from device only if there are associated callbacks (minimize # of I2C  transactions)
                 input_state = self._cache["GPIO"]
+                bus_accessed = False
                 if any(
                     hasattr(entity, "push_update") for entity in self._entities[0:8]
                 ):
+                    bus_accessed = True
                     value = self[GPIOA]
                     if value is not None:
                         input_state = input_state & 0xFF00 | value
                 if any(
                     hasattr(entity, "push_update") for entity in self._entities[8:16]
                 ):
+                    bus_accessed = True
                     value = self[GPIOB]
                     if value is not None:
                         input_state = input_state & 0x00FF | (value << 8)
+
+                # During a bus fault, probe the device when the reads above
+                # did not already touch the bus: recovery must resync the
+                # output registers without waiting for the next user action
+                if not bus_accessed and self._i2c_fault_count > 0:
+                    self[GPIOA]
+
+                # Periodically verify the device still holds its
+                # configuration: address 0x00 is IODIRA in both BANK
+                # mappings, so a power-cycled device (reset to all-inputs)
+                # is detected even when no bus error was ever raised
+                self._verify_countdown -= 1
+                if self._verify_countdown <= 0 and self._i2c_fault_count == 0:
+                    self._verify_countdown = DEVICE_VERIFY_CYCLES
+                    value = self[IODIRA]
+                    if value is not None and value != self._cache["IODIR"] & 0xFF:
+                        _LOGGER.warning(
+                            "%s lost its configuration (device power cycle?);"
+                            " resynchronizing",
+                            self.unique_id,
+                        )
+                        self._resync_registers()
 
                 # Check pin values that changed and update input cache
                 self._update_bitmap = self._update_bitmap | (
