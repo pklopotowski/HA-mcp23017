@@ -4,6 +4,7 @@ import functools
 import logging
 
 from . import async_get_or_create
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -30,6 +31,8 @@ from .const import (
     DEFAULT_INVERT_LOGIC,
     DEFAULT_HW_SYNC,
     DEFAULT_PULSE_TIME,
+    MIN_PULSE_TIME,
+    MAX_PULSE_TIME,
     DEFAULT_DOUBLE_CLICK,
     DEFAULT_DOUBLE_CLICK_WINDOW,
     DEFAULT_EVENT_SUPPRESS_MARGIN,
@@ -37,6 +40,10 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+def _clamp_pulse_time(value):
+    """Clamp a pulse time from a pre-bounds entry into the safe range."""
+    return min(max(value, MIN_PULSE_TIME), MAX_PULSE_TIME)
 
 async def _async_setup_platform(hass, config, async_add_entities, platform):
     """Set up the MCP23017 platform for a specific entity type."""
@@ -126,9 +133,13 @@ class MCP23017Entity:
             CONF_MOMENTARY,
             config_entry.data.get(CONF_MOMENTARY, False)
         )
-        self._pulse_time = config_entry.options.get(
-            CONF_PULSE_TIME,
-            config_entry.data.get(CONF_PULSE_TIME, DEFAULT_PULSE_TIME)
+        # Clamp: entries stored before the bounds existed may carry an
+        # out-of-range value; the clamped value is persisted below
+        self._pulse_time = _clamp_pulse_time(
+            config_entry.options.get(
+                CONF_PULSE_TIME,
+                config_entry.data.get(CONF_PULSE_TIME, DEFAULT_PULSE_TIME),
+            )
         )
         self._sensor = config_entry.options.get(
             CONF_SENSOR,
@@ -154,6 +165,8 @@ class MCP23017Entity:
         self._entry_id = config_entry.entry_id
         self._suppress_events_until = 0.0
         self._click_timer_cancel = None
+        self._unsub_ha_stop = None
+        self._pulse_ready_at = 0.0
 
         # Create or update option values for the platform
         hass.config_entries.async_update_entry(
@@ -184,6 +197,15 @@ class MCP23017Entity:
 
     async def async_added_to_hass(self):
         """Register callbacks and initialize state."""
+        # The pulse turn-off timer does not survive a HA stop, while the
+        # MCP23017 output latch does: park a pulsed pin at its rest level
+        # before shutdown so a restart cannot land mid-pulse. Registered
+        # unconditionally and gated on the current momentary setting in the
+        # handler, so an options change cannot leave the listener missing
+        # (momentary enabled later) or stale (momentary disabled later)
+        self._unsub_ha_stop = self._hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STOP, self._async_ha_stop
+        )
         if self._sensor:
             self._subscribe_sensor()
             # Fetch initial sensor state
@@ -220,23 +242,58 @@ class MCP23017Entity:
             self._unsubscribe_sensor()
             self._unsubscribe_sensor = None
 
+    async def _async_force_rest_level(self):
+        """Cancel a pending pulse and force the pin to its inactive rest level.
+
+        The write is forced past the cache dedup, as the cache may be out of
+        sync after a bus fault. When an active pulse was interrupted, the
+        inter-pulse gap is armed as well, so the forced rest cannot be
+        followed by an immediate back-to-back pulse; a forced rest with no
+        pulse in flight (e.g. an unrelated options save) must not block
+        subsequent pulses.
+        """
+        pulse_was_active = self._unsub_turn_off is not None
+        await self._async_cancel_turn_off_callback_if_exists()
+        if pulse_was_active:
+            self._pulse_ready_at = max(
+                self._pulse_ready_at,
+                self._hass.loop.time() + self._pulse_time / 1000.0,
+            )
+        if not self._sensor:
+            # The pin is physically at rest now; without this, a pulse
+            # interrupted mid-flight leaves _state stuck at True and the
+            # next turn_off would fire a spurious pulse
+            self._state = False
+        await self._hass.async_add_executor_job(
+            functools.partial(
+                self._device.set_pin_value,
+                self._pin_number,
+                self._invert_logic,
+                True,
+            )
+        )
+
+    async def _async_ha_stop(self, _event):
+        """Force a pulsed output to its rest level on Home Assistant stop."""
+        self._unsub_ha_stop = None
+        if not self._momentary:
+            return
+        await self._async_force_rest_level()
+
     async def async_will_remove_from_hass(self):
         """Clean up subscriptions and pending timers before removal."""
+        if self._unsub_ha_stop:
+            self._unsub_ha_stop()
+            self._unsub_ha_stop = None
         self._unsubscribe_sensor_if_exists()
         await self._async_cancel_turn_off_callback_if_exists()
         if self._click_timer_cancel:
             self._click_timer_cancel()
             self._click_timer_cancel = None
         if self._momentary:
-            # Leave a pulsed output at its inactive level so a removal in
-            # the middle of a pulse cannot keep the relay coil energized
-            await self._hass.async_add_executor_job(
-                functools.partial(
-                    self._device.set_pin_value,
-                    self._pin_number,
-                    self._invert_logic,
-                )
-            )
+            # A removal in the middle of a pulse cannot be allowed to keep
+            # the relay coil energized
+            await self._async_force_rest_level()
 
     async def _async_sensor_changed(self, event):
         """Handle binary sensor state changes."""
@@ -362,7 +419,13 @@ class MCP23017Entity:
     async def _async_handle_turn_off(self, _):
         """Callback to turn off the switch after the pulse time."""
         await self._async_set_pin_value(False)
-        self._unsub_turn_off = None 
+        self._unsub_turn_off = None
+        # The gap armed at pulse start assumed an on-time turn-off; if the
+        # timer fired late, extend it so a full gap still follows the pulse
+        self._pulse_ready_at = max(
+            self._pulse_ready_at,
+            self._hass.loop.time() + self._pulse_time / 1000.0,
+        )
 
     async def _async_schedule_turn_off(self):
         """Schedule the turn-off callback after the pulse time."""
@@ -381,8 +444,26 @@ class MCP23017Entity:
             _LOGGER.debug(f"{self._pin_name} turn-off callback cancelled.")
 
     async def _async_toggle_momentary_switch(self):
-        """Toggle a momentary switch on and off after the pulse time."""
-        await self._async_cancel_turn_off_callback_if_exists()
+        """Pulse the output on and back off after the pulse time.
+
+        Requests arriving while a pulse is active or during the inter-pulse
+        gap are dropped instead of restarting the turn-off timer: extending
+        the pulse would keep the relay coil energized for as long as the
+        requests keep coming.
+        """
+        now = self._hass.loop.time()
+        if self._unsub_turn_off or now < self._pulse_ready_at:
+            # Warning, not debug: a dropped request is a state-changing
+            # command that was not executed
+            _LOGGER.warning(
+                f"{self._pin_name} pulse request dropped: previous pulse "
+                f"still active or inter-pulse gap not elapsed."
+            )
+            return
+        # Armed synchronously before the first await (pulse plus gap), so a
+        # concurrent request cannot pass the guard while the pin write is
+        # still in the executor
+        self._pulse_ready_at = now + 2 * self._pulse_time / 1000.0
         await self._async_set_pin_value(True)  # Turn on
         await self._async_schedule_turn_off()
 
@@ -414,7 +495,9 @@ class MCP23017Entity:
         """Handle update from config entry options."""
         self._invert_logic = config_entry.options[CONF_INVERT_LOGIC]
         self._momentary = config_entry.options.get(CONF_MOMENTARY, self._momentary)
-        self._pulse_time = config_entry.options.get(CONF_PULSE_TIME, self._pulse_time)
+        self._pulse_time = _clamp_pulse_time(
+            config_entry.options.get(CONF_PULSE_TIME, self._pulse_time)
+        )
         self._double_click = config_entry.options.get(
             CONF_DOUBLE_CLICK, self._double_click
         )
@@ -439,14 +522,7 @@ class MCP23017Entity:
         if self._momentary:
             # Pulsed output: never re-drive the tracked state onto the pin,
             # its rest level must stay inactive
-            await self._async_cancel_turn_off_callback_if_exists()
-            await hass.async_add_executor_job(
-                functools.partial(
-                    self._device.set_pin_value,
-                    self._pin_number,
-                    self._invert_logic,
-                )
-            )
+            await self._async_force_rest_level()
         else:
             await hass.async_add_executor_job(
                 functools.partial(
@@ -469,9 +545,14 @@ class MCP23017Entity:
         Return True when successful.
         """
         if self.device:
-            # Reset pin value when HW sync is not required
-            if not self._hw_sync:
-                self._device.set_pin_value(self._pin_number, self._invert_logic)
+            # Reset pin value when HW sync is not required; a pulsed output
+            # is always reset — its only safe start-up level is the rest
+            # level, e.g. after a restart that interrupted a pulse — and the
+            # write is forced in case the cache is stale after a bus fault
+            if self._momentary or not self._hw_sync:
+                self._device.set_pin_value(
+                    self._pin_number, self._invert_logic, self._momentary
+                )
             # Configure entity as output
             self._device.set_input(self._pin_number, False)
             self._state = self._device.get_pin_value(self._pin_number) ^ self._invert_logic
