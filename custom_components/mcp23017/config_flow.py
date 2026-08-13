@@ -38,6 +38,8 @@ from .const import (
     DEFAULT_DOUBLE_CLICK,
     DEFAULT_DOUBLE_CLICK_WINDOW,
     DEFAULT_EVENT_SUPPRESS_MARGIN,
+    MIN_PULSE_TIME,
+    MAX_PULSE_TIME,
     DOMAIN,
     PULL_MODE_NONE,
     PULL_MODE_UP,
@@ -205,7 +207,10 @@ class Mcp23017OptionsFlowHandler(config_entries.OptionsFlow):
                         default=self.config_entry.options.get(
                             CONF_PULSE_TIME, DEFAULT_PULSE_TIME
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0)),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=MIN_PULSE_TIME, max=MAX_PULSE_TIME),
+                    ),
                     vol.Optional(
                         CONF_SENSOR,
                         description={

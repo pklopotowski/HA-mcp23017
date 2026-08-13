@@ -33,6 +33,15 @@ DEFAULT_HW_SYNC = True
 
 DEFAULT_MOMENTARY = False
 DEFAULT_PULSE_TIME = 200
+# Bounds protect the relay coil: too short a pulse may not switch the relay,
+# too long a pulse (e.g. a ms/s typo) overheats a coil rated for pulsed duty
+MIN_PULSE_TIME = 50  # ms
+MAX_PULSE_TIME = 5000  # ms
+# Clamp instead of reject: an out-of-range value in an existing YAML config
+# must not make the entities disappear after an upgrade
+PULSE_TIME_CLAMP = vol.All(
+    vol.Coerce(int), vol.Clamp(min=MIN_PULSE_TIME, max=MAX_PULSE_TIME)
+)
 
 CONF_DOUBLE_CLICK = "double_click"
 CONF_DOUBLE_CLICK_WINDOW = "double_click_window"
@@ -53,7 +62,7 @@ _ADVANCED_PIN_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_PIN_NAME): cv.string,
         vol.Optional(CONF_MOMENTARY, default=True): cv.boolean,
-        vol.Optional(CONF_PULSE_TIME, default=DEFAULT_PULSE_TIME): cv.positive_int,
+        vol.Optional(CONF_PULSE_TIME, default=DEFAULT_PULSE_TIME): PULSE_TIME_CLAMP,
         vol.Optional(CONF_SENSOR): cv.string,
         vol.Optional(CONF_DOUBLE_CLICK, default=DEFAULT_DOUBLE_CLICK): cv.boolean,
         vol.Optional(
