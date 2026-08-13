@@ -137,10 +137,10 @@ switch:
 | Option | Default | Applies to | Description |
 |---|---|---|---|
 | `invert_logic` | `false` | all | invert pin polarity |
-| `hw_sync` | `true` | switch/light | initial state from hardware |
+| `hw_sync` | `true`² | switch/light | initial state from hardware |
 | `pull_mode` | `up` | binary_sensor | internal pull-up resistor |
 | `momentary` | `true`¹ | switch/light | pulsed output |
-| `pulse_time` | `200` ms | switch/light | pulse duration |
+| `pulse_time` | `200` ms (50–5000) | switch/light | pulse duration |
 | `sensor` | — | switch/light | feedback `binary_sensor` entity |
 | `double_click` | `false` | switch/light | single/double press discrimination |
 | `double_click_window` | `600` ms | switch/light | max spacing of a double click |
@@ -148,10 +148,50 @@ switch:
 
 ¹ `true` in the advanced (mapping) form, `false` in the simple form.
 
-All options are also editable per entity in the UI (integration → entity →
-*Configure*). Values saved in the UI persist across restarts and take
-precedence over YAML for these fields; YAML defines new pins and initial
-values. See [docs/specifications/03](docs/specifications/03-stable-config-entries.md).
+² Ignored for `momentary` pins: a pulsed output always starts at its
+inactive rest level (see *Pulse safety behavior* below).
+
+### YAML vs UI precedence
+
+Following Home Assistant's recommended model, the **config entry — not the
+YAML file — is the source of truth** once a pin has been imported:
+
+- YAML **defines pins**: a new pin in YAML creates the config entry, with
+  the YAML values as its initial settings. Removing a pin from YAML does not
+  delete the entry — remove it on the integration page.
+- After the first import, the per-pin settings above are owned by the entry
+  options and edited in the UI (integration → entity → *Configure*). UI
+  values persist across restarts. **Editing these fields in YAML has no
+  effect on an already-imported pin.**
+- To re-apply YAML values to an existing pin, delete its config entry on the
+  integration page and restart — the import recreates it from YAML.
+
+See [docs/specifications/03](docs/specifications/03-stable-config-entries.md)
+for the exact rules.
+
+### Pulse safety behavior
+
+For `momentary` pins the integration enforces (details in
+[docs/specifications/04](docs/specifications/04-hardware-safety.md)):
+
+- `pulse_time` is bounded to **50–5000 ms**. Out-of-range values found in
+  YAML or in entries stored by older versions are clamped to the nearest
+  bound instead of being rejected, so an upgrade never drops entities.
+- **A pulse cannot be extended.** Requests arriving while a pulse is active,
+  or within one pulse time after it ends, are dropped and logged as a
+  warning — the relay coil duty cycle is bounded at 50% no matter how fast
+  requests arrive. An automation toggling one relay faster than twice the
+  pulse time must retry or slow down.
+- The pin is forced to its inactive rest level when Home Assistant stops and
+  reset to it at startup (regardless of `hw_sync`), so a restart landing
+  mid-pulse cannot leave the coil energized.
+- After an I2C bus fault, the output registers are automatically rewritten
+  from the driver state on recovery — a turn-off lost to a bus error is
+  re-applied instead of leaving the coil energized.
+
+A software timer cannot survive a hard host crash: if an over-length pulse
+can damage your hardware, add a hardware safeguard (a one-shot/monostable
+coil driver, or a coil rated for continuous duty).
 
 ## Wall-button events
 
